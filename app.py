@@ -61,15 +61,11 @@ def cargar_turnos():
         return pd.DataFrame()
 
 def generar_enlace_google_calendar(fecha_str, turno, padre, estudiante):
-    # Definir horas según el turno elegido (Zona horaria Lima UTC-5)
-    # Formato UTC: YYYYMMDDTHHMMSSZ (UTC-5 significa sumar 5 horas para UTC)
     f = fecha_str.replace("-", "")
     if "Mañana" in turno:
-        # 07:30 a 08:15 local -> 12:30 a 13:15 UTC
         start_time = f"{f}T123000Z"
         end_time = f"{f}T131500Z"
     else:
-        # 14:15 a 15:00 local -> 19:15 a 20:00 UTC
         start_time = f"{f}T191500Z"
         end_time = f"{f}T200000Z"
 
@@ -78,7 +74,7 @@ def generar_enlace_google_calendar(fecha_str, turno, padre, estudiante):
         f"Apoderado: {padre}\n"
         f"Estudiante: {estudiante}\n"
         f"Turno: {turno}\n\n"
-        f"Recuerda asistir puntualmente con tu chaleco/distintivo BAPES para resguardar la entrada o salida de los estudiantes."
+        f"Recuerda asistir puntualmente para resguardar la seguridad de los estudiantes."
     )
     ubicacion = "Puerta Principal del Colegio"
 
@@ -191,16 +187,13 @@ with tab_registro:
                 if r.status_code in [200, 302] or "ok" in r.text:
                     st.success("🎉 ¡Tu turno ha sido registrado correctamente!")
                     
-                    # Generación de enlaces de recordatorio
                     url_calendar = generar_enlace_google_calendar(
                         info_dia["fecha_str"], turno_elegido, nombre_padre, estudiante
                     )
-                    
                     mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por apoyar en la seguridad escolar!"
                     url_whatsapp = f"https://wa.me/51{telefono_padre}?text={urllib.parse.quote(mensaje_wa)}"
                     
                     st.markdown("### 🔔 Activa tu recordatorio automático:")
-                    
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
                         st.markdown(f"""
@@ -215,7 +208,7 @@ with tab_registro:
                             </a>
                         """, unsafe_allow_html=True)
                     
-                    st.caption("💡 Si presionas **Guardar en Google Calendar**, tu teléfono te notificará automáticamente 24 horas y 1 hora antes de tu turno.")
+                    st.caption("💡 Al presionar **Guardar en Google Calendar**, tu teléfono te notificará automáticamente 24 horas y 1 hora antes de tu turno.")
                 else:
                     st.error(f"Error al guardar: Código {r.status_code}")
             except Exception as ex:
@@ -224,16 +217,13 @@ with tab_registro:
 with tab_horario:
     st.markdown(f"#### 📋 Rol de Vigilancia BAPES ({mes_actual_nombre} {hoy.year})")
     
-    col_ref, col_link = st.columns([1, 2])
-    with col_ref:
-        if st.button("🔄 Actualizar lista"):
-            st.rerun()
-    with col_link:
-        st.markdown("[📊 **Abrir hoja de Google Sheets completa**](https://docs.google.com/spreadsheets/d/1j6sczaZUeuds1bF1mzzHYHgSuy52q1nBbNeaCukg19M/edit?usp=sharing)")
+    if st.button("🔄 Actualizar lista"):
+        st.rerun()
 
     if not df_turnos.empty and "padre" in df_turnos.columns:
         mes_prefijo = hoy.strftime("%Y-%m")
         if "fecha" in df_turnos.columns:
+            # Limpiamos la fecha técnica ISO para mostrar solo YYYY-MM-DD
             df_turnos["fecha_corta"] = df_turnos["fecha"].astype(str).str.strip().str[:10]
             df_mes = df_turnos[df_turnos["fecha_corta"].str.startswith(mes_prefijo)].copy()
         else:
@@ -241,9 +231,20 @@ with tab_horario:
 
         df_mostrar = df_mes if not df_mes.empty else df_turnos
 
-        cols_deseadas = [c for c in ["dia", "fecha", "turno", "padre", "estudiante", "grado"] if c in df_mostrar.columns]
-        vista = df_mostrar[cols_deseadas].sort_values(by="fecha", ascending=True).copy()
-        vista.columns = [c.capitalize() for c in cols_deseadas]
+        # Formatear la columna fecha para que se vea legible (DD/MM/YYYY)
+        if "fecha_corta" in df_mostrar.columns:
+            try:
+                df_mostrar["fecha_formato"] = pd.to_datetime(df_mostrar["fecha_corta"]).dt.strftime("%d/%m/%Y")
+            except Exception:
+                df_mostrar["fecha_formato"] = df_mostrar["fecha_corta"]
+        else:
+            df_mostrar["fecha_formato"] = df_mostrar.get("fecha", "")
+
+        df_mostrar = df_mostrar.rename(columns={"fecha_formato": "Fecha_Limpia"})
+        cols_deseadas = [c for c in ["dia", "Fecha_Limpia", "turno", "padre", "estudiante", "grado"] if c in df_mostrar.columns]
+        
+        vista = df_mostrar[cols_deseadas].sort_values(by="Fecha_Limpia", ascending=True).copy()
+        vista.columns = ["Día", "Fecha", "Turno", "Padre / Apoderado", "Estudiante", "Grado"]
         
         st.dataframe(vista, use_container_width=True, hide_index=True)
     else:
