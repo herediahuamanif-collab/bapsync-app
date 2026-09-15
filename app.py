@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
-from streamlit_gsheets import GSheetsConnection
+import requests
 
 # 1. Configuración de página
 st.set_page_config(page_title="BapSync - Turnos BAPES", page_icon="🛡️", layout="centered")
@@ -35,17 +35,22 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 2. Conexión con Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
+# URL DE LA API DE GOOGLE SHEETS (Se lee desde Secrets o variable)
+API_URL = st.secrets.get("SHEET_API_URL", "")
 
 def cargar_turnos():
+    if not API_URL:
+        return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
     try:
-        df = conn.read(ttl=3)
-        return df if not df.empty else pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
+        res = requests.get(API_URL, timeout=8)
+        if res.status_code == 200:
+            datos = res.json()
+            return pd.DataFrame(datos) if datos else pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
+        return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
     except Exception:
         return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
 
-# 3. Logo centrado
+# 2. Logo centrado
 col_izq, col_centro, col_der = st.columns([1, 4, 1])
 with col_centro:
     try:
@@ -55,7 +60,7 @@ with col_centro:
 
 st.markdown("<div class='banner-card'><b>Seguridad Escolar BAPES</b><br>Turnos: Mañana (7:30 - 8:15) y Tarde (2:15 - 3:00) | Máx. 5 padres por turno</div>", unsafe_allow_html=True)
 
-# 4. Cálculo automático de la semana actual (Lunes a Viernes)
+# 3. Cálculo de la semana actual (Lunes a Viernes)
 hoy = datetime.today()
 lunes = hoy - timedelta(days=hoy.weekday())
 nombres_dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
@@ -71,7 +76,7 @@ for i in range(5):
 
 df_turnos = cargar_turnos()
 
-# 5. Pestañas principales
+# 4. Pestañas
 tab_registro, tab_horario = st.tabs(["📝 Inscribirme a un Turno", "📅 Ver Horario Semanal"])
 
 with tab_registro:
@@ -86,11 +91,11 @@ with tab_registro:
     ]
     turno_elegido = st.radio("⏰ Turno:", turnos_disponibles)
 
-    # Validar cupos (Máx 5)
-    if not df_turnos.empty:
+    # Validar cupos en tiempo real
+    if not df_turnos.empty and "fecha" in df_turnos.columns and "turno" in df_turnos.columns:
         ocupados = len(df_turnos[
-            (df_turnos["fecha"] == info_dia["fecha_str"]) & 
-            (df_turnos["turno"] == turno_elegido)
+            (df_turnos["fecha"].astype(str) == info_dia["fecha_str"]) & 
+            (df_turnos["turno"].astype(str) == turno_elegido)
         ])
     else:
         ocupados = 0
@@ -100,7 +105,7 @@ with tab_registro:
     if libres > 0:
         st.info(f"✅ Cupos disponibles: **{libres} de 5**")
     else:
-        st.error("❌ Turno completo (5/5 padres ya registrados). Elige otro turno o día.")
+        st.error("❌ Turno completo (5/5 padres ya registrados). Elige otro horario.")
 
     st.markdown("##### Tus Datos:")
     nombre_padre = st.text_input("Nombre y Apellidos del Apoderado:")
@@ -113,8 +118,10 @@ with tab_registro:
             st.warning("⚠️ Por favor completa tu nombre, celular y nombre del estudiante.")
         elif libres <= 0:
             st.error("Lo sentimos, este turno ya está completo.")
+        elif not API_URL:
+            st.error("Falta configurar la URL de la base de datos en los Secrets de Streamlit.")
         else:
-            nuevo = pd.DataFrame([{
+            payload = {
                 "fecha": info_dia["fecha_str"],
                 "dia": info_dia["dia"],
                 "turno": turno_elegido,
@@ -123,30 +130,36 @@ with tab_registro:
                 "estudiante": estudiante.strip(),
                 "grado": grado.strip(),
                 "creado": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }])
+            }
             
-            df_actualizado = pd.concat([df_turnos, nuevo], ignore_index=True)
-            conn.update(data=df_actualizado)
-            st.cache_data.clear()
-            
-            st.success("🎉 ¡Tu turno ha sido registrado correctamente!")
-            
-            mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por cuidar la seguridad escolar de los estudiantes!"
-            url_whatsapp = f"https://wa.me/51{telefono_padre}?text={urllib.parse.quote(mensaje_wa)}"
-            
-            st.markdown(f"""
-                <div style='text-align: center; margin-top: 10px;'>
-                    <a href='{url_whatsapp}' target='_blank' style='background-color:#25D366; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>
-                        📲 Enviar recordatorio a mi WhatsApp
-                    </a>
-                </div>
-            """, unsafe_allow_html=True)
+            try:
+                r = requests.post(API_URL, json=payload, timeout=10)
+                if r.status_code == 200:
+                    st.success("🎉 ¡Tu turno ha sido registrado correctamente!")
+                    mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por cuidar la seguridad escolar!"
+                    url_whatsapp = f"https://wa.me/51{telefono_padre}?text={urllib.parse.quote(mensaje_wa)}"
+                    
+                    st.markdown(f"""
+                        <div style='text-align: center; margin-top: 10px;'>
+                            <a href='{url_whatsapp}' target='_blank' style='background-color:#25D366; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:bold; display:inline-block;'>
+                                📲 Enviar recordatorio a mi WhatsApp
+                            </a>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    st.rerun()
+                else:
+                    st.error("Error al guardar en la base de datos.")
+            except Exception as ex:
+                st.error(f"Error de conexión: {ex}")
 
 with tab_horario:
     st.markdown("#### 📋 Horario de Vigilancia BAPES (Semana Actual)")
     
     fechas_semana = [d["fecha_str"] for d in dias_dict.values()]
-    df_esta_semana = df_turnos[df_turnos["fecha"].isin(fechas_semana)] if not df_turnos.empty else pd.DataFrame()
+    if not df_turnos.empty and "fecha" in df_turnos.columns:
+        df_esta_semana = df_turnos[df_turnos["fecha"].astype(str).isin(fechas_semana)]
+    else:
+        df_esta_semana = pd.DataFrame()
 
     if not df_esta_semana.empty:
         vista_publica = df_esta_semana[["dia", "fecha", "turno", "padre", "estudiante", "grado"]].copy()
