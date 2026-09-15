@@ -35,20 +35,21 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# URL DE LA API DE GOOGLE SHEETS (Se lee desde Secrets o variable)
+# URL DE LA API DE GOOGLE SHEETS (Secrets)
 API_URL = st.secrets.get("SHEET_API_URL", "")
 
 def cargar_turnos():
     if not API_URL:
-        return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
+        return pd.DataFrame()
     try:
-        res = requests.get(API_URL, timeout=10, allow_redirects=True)
+        res = requests.get(API_URL, timeout=12, allow_redirects=True)
         if res.status_code == 200:
             datos = res.json()
-            return pd.DataFrame(datos) if datos else pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
-        return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
+            if isinstance(datos, list) and len(datos) > 0:
+                return pd.DataFrame(datos)
+        return pd.DataFrame()
     except Exception:
-        return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
+        return pd.DataFrame()
 
 # 2. Logo centrado
 col_izq, col_centro, col_der = st.columns([1, 4, 1])
@@ -93,9 +94,12 @@ with tab_registro:
 
     # Validar cupos en tiempo real
     if not df_turnos.empty and "fecha" in df_turnos.columns and "turno" in df_turnos.columns:
+        fechas_col = df_turnos["fecha"].astype(str).str.strip().str[:10]
+        turnos_col = df_turnos["turno"].astype(str).str.strip()
+        
         ocupados = len(df_turnos[
-            (df_turnos["fecha"].astype(str) == info_dia["fecha_str"]) & 
-            (df_turnos["turno"].astype(str) == turno_elegido)
+            (fechas_col == info_dia["fecha_str"]) & 
+            (turnos_col == turno_elegido)
         ])
     else:
         ocupados = 0
@@ -133,10 +137,8 @@ with tab_registro:
             }
             
             try:
-                # allow_redirects=True sigue la redirección 302 estándar de Google Apps Script
                 r = requests.post(API_URL, json=payload, timeout=15, allow_redirects=True)
                 
-                # Google Apps Script responde 200 tras seguir la redirección o texto con status ok
                 if r.status_code in [200, 302] or "ok" in r.text:
                     st.success("🎉 ¡Tu turno ha sido registrado correctamente!")
                     mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por cuidar la seguridad escolar!"
@@ -158,15 +160,29 @@ with tab_registro:
 with tab_horario:
     st.markdown("#### 📋 Horario de Vigilancia BAPES (Semana Actual)")
     
-    fechas_semana = [d["fecha_str"] for d in dias_dict.values()]
-    if not df_turnos.empty and "fecha" in df_turnos.columns:
-        df_esta_semana = df_turnos[df_turnos["fecha"].astype(str).isin(fechas_semana)]
-    else:
-        df_esta_semana = pd.DataFrame()
+    col_ref, col_link = st.columns([1, 2])
+    with col_ref:
+        if st.button("🔄 Actualizar lista"):
+            st.rerun()
+    with col_link:
+        st.markdown("[📊 **Abrir hoja de Google Sheets completa**](https://docs.google.com/spreadsheets/d/1j6sczaZUeuds1bF1mzzHYHgSuy52q1nBbNeaCukg19M/edit?usp=sharing)")
 
-    if not df_esta_semana.empty:
-        vista_publica = df_esta_semana[["dia", "fecha", "turno", "padre", "estudiante", "grado"]].copy()
-        vista_publica.columns = ["Día", "Fecha", "Turno", "Apoderado", "Estudiante", "Grado"]
-        st.dataframe(vista_publica, use_container_width=True, hide_index=True)
+    if not df_turnos.empty and "padre" in df_turnos.columns:
+        fechas_semana = [d["fecha_str"] for d in dias_dict.values()]
+        
+        # Limpieza flexible de fecha para que no falle si Google Sheets añade horas
+        if "fecha" in df_turnos.columns:
+            df_turnos["fecha_corta"] = df_turnos["fecha"].astype(str).str.strip().str[:10]
+            df_filtrado = df_turnos[df_turnos["fecha_corta"].isin(fechas_semana)]
+        else:
+            df_filtrado = pd.DataFrame()
+            
+        df_mostrar = df_filtrado if not df_filtrado.empty else df_turnos
+
+        cols_deseadas = [c for c in ["dia", "fecha", "turno", "padre", "estudiante", "grado"] if c in df_mostrar.columns]
+        vista = df_mostrar[cols_deseadas].copy()
+        vista.columns = [c.capitalize() for c in cols_deseadas]
+        
+        st.dataframe(vista, use_container_width=True, hide_index=True)
     else:
-        st.info("Todavía no hay turnos ocupados esta semana. ¡Sé el primero en registrarte!")
+        st.info("Todavía no hay turnos registrados en la lista.")
