@@ -8,7 +8,7 @@ import requests
 # 1. Configuración de página
 st.set_page_config(page_title="BapSync - Turnos BAPES", page_icon="🛡️", layout="centered")
 
-# Estilos visuales acordes al logo
+# Estilos visuales
 st.markdown("""
     <style>
     .stButton>button {
@@ -44,6 +44,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# CONTRASEÑA ROBUSTA DE DIRECCIÓN / ADMINISTRACIÓN
+ADMIN_PIN = "Bp$2026#SecDir!"
+
 # URL DE LA API DE GOOGLE SHEETS
 API_URL = st.secrets.get("SHEET_API_URL", "")
 
@@ -69,7 +72,7 @@ def generar_enlace_google_calendar(fecha_str, turno, padre, estudiante):
         start_time = f"{f}T191500Z"
         end_time = f"{f}T200000Z"
 
-    titulo = f"🛡️ Turno BAPES: Seguridad Escolar"
+    titulo = "🛡️ Turno BAPES: Seguridad Escolar"
     detalles = (
         f"Apoderado: {padre}\n"
         f"Estudiante: {estudiante}\n"
@@ -123,8 +126,9 @@ for dia_num in range(1, total_dias_mes + 1):
 df_turnos = cargar_turnos()
 
 # 4. Pestañas principales
-tab_registro, tab_horario, tab_notif = st.tabs(["📝 Inscribirme a un Turno", "📅 Ver Rol Mensual", "🔔 Avisar a Padres de Hoy"])
+tab_registro, tab_horario, tab_notif = st.tabs(["📝 Inscribirme a un Turno", "📅 Ver Rol Mensual", "🔒 Panel de Dirección"])
 
+# --- PESTAÑA 1: REGISTRO ---
 with tab_registro:
     st.markdown(f"#### Selecciona tu fecha en {mes_actual_nombre} y turno:")
     
@@ -154,7 +158,7 @@ with tab_registro:
     if libres > 0:
         st.info(f"✅ Cupos disponibles: **{libres} de 5** para el {dia_elegido_label}")
     else:
-        st.error(f"❌ Turno completo (5/5 padres ya registrados). Elige otro día u horario.")
+        st.error("❌ Turno completo (5/5 padres ya registrados). Elige otro día u horario.")
 
     st.markdown("##### Tus Datos:")
     nombre_padre = st.text_input("Nombre y Apellidos del Apoderado:")
@@ -214,6 +218,7 @@ with tab_registro:
             except Exception as ex:
                 st.error(f"Error de conexión: {ex}")
 
+# --- PESTAÑA 2: ROL MENSUAL ---
 with tab_horario:
     st.markdown(f"#### 📋 Rol de Vigilancia BAPES ({mes_actual_nombre} {hoy.year})")
     
@@ -223,7 +228,6 @@ with tab_horario:
     if not df_turnos.empty and "padre" in df_turnos.columns:
         mes_prefijo = hoy.strftime("%Y-%m")
         if "fecha" in df_turnos.columns:
-            # Limpiamos la fecha técnica ISO para mostrar solo YYYY-MM-DD
             df_turnos["fecha_corta"] = df_turnos["fecha"].astype(str).str.strip().str[:10]
             df_mes = df_turnos[df_turnos["fecha_corta"].str.startswith(mes_prefijo)].copy()
         else:
@@ -231,7 +235,6 @@ with tab_horario:
 
         df_mostrar = df_mes if not df_mes.empty else df_turnos
 
-        # Formatear la columna fecha para que se vea legible (DD/MM/YYYY)
         if "fecha_corta" in df_mostrar.columns:
             try:
                 df_mostrar["fecha_formato"] = pd.to_datetime(df_mostrar["fecha_corta"]).dt.strftime("%d/%m/%Y")
@@ -250,39 +253,50 @@ with tab_horario:
     else:
         st.info(f"Todavía no hay turnos registrados para el mes de {mes_actual_nombre}.")
 
+# --- PESTAÑA 3: PANEL EXCLUSIVO DIRECCIÓN / COORDINACIÓN ---
 with tab_notif:
-    st.markdown(f"#### 🔔 Enviar Recordatorio a los Padres de Hoy ({hoy.strftime('%d/%m/%Y')})")
-    st.caption("Esta sección permite a la coordinadora avisar a los apoderados que les toca asistir hoy con un solo clic.")
+    st.markdown("#### 🔒 Acceso Exclusivo para Dirección / Coordinación")
+    
+    pin_ingresado = st.text_input("Ingrese la clave de seguridad institucional:", type="password")
 
-    if not df_turnos.empty and "fecha" in df_turnos.columns:
-        df_turnos["fecha_corta"] = df_turnos["fecha"].astype(str).str.strip().str[:10]
-        padres_hoy = df_turnos[df_turnos["fecha_corta"] == fecha_hoy_str]
-
-        if not padres_hoy.empty:
-            st.success(f"Hay **{len(padres_hoy)} padre(s)** asignados para el día de hoy.")
+    if pin_ingresado:
+        if pin_ingresado == ADMIN_PIN:
+            st.success("Acceso autorizado con credenciales institucionales.")
+            st.markdown(f"##### 🔔 Recordatorios para Padres de Hoy ({hoy.strftime('%d/%m/%Y')})")
             
-            for _, fila in padres_hoy.iterrows():
-                padre_nom = fila.get("padre", "Apoderado")
-                turno_nom = fila.get("turno", "Turno BAPES")
-                tel = str(fila.get("telefono", "")).replace(".0", "").strip()
-                est = fila.get("estudiante", "el estudiante")
+            if not df_turnos.empty and "fecha" in df_turnos.columns:
+                df_turnos["fecha_corta"] = df_turnos["fecha"].astype(str).str.strip().str[:10]
+                padres_hoy = df_turnos[df_turnos["fecha_corta"] == fecha_hoy_str]
 
-                msg_hoy = (
-                    f"Estimado/a {padre_nom}, le recordamos que el día de hoy le toca asistir a su turno de seguridad BAPES en el horario: {turno_nom}, "
-                    f"apoyando en la seguridad de su hijo/a {est}. ¡Agradecemos su puntualidad!"
-                )
-                url_aviso = f"https://wa.me/51{tel}?text={urllib.parse.quote(msg_hoy)}"
+                if not padres_hoy.empty:
+                    st.info(f"Hay **{len(padres_hoy)} padre(s)** asignados para el día de hoy.")
+                    
+                    for _, fila in padres_hoy.iterrows():
+                        padre_nom = fila.get("padre", "Apoderado")
+                        turno_nom = fila.get("turno", "Turno BAPES")
+                        tel = str(fila.get("telefono", "")).replace(".0", "").strip()
+                        est = fila.get("estudiante", "el estudiante")
 
-                st.markdown(f"""
-                    <div class='card-recordatorio'>
-                        <b>👤 {padre_nom}</b> — <i>{turno_nom}</i><br>
-                        Estudiante: {est} | Celular: {tel}<br><br>
-                        <a href='{url_aviso}' target='_blank' style='background-color:#25D366; color:white; padding:6px 14px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; display:inline-block;'>
-                            📲 Enviar Recordatorio por WhatsApp
-                        </a>
-                    </div>
-                """, unsafe_allow_html=True)
+                        msg_hoy = (
+                            f"Estimado/a {padre_nom}, le recordamos que el día de hoy le toca asistir a su turno de seguridad BAPES en el horario: {turno_nom}, "
+                            f"apoyando en la seguridad de su hijo/a {est}. ¡Agradecemos su puntualidad!"
+                        )
+                        url_aviso = f"https://wa.me/51{tel}?text={urllib.parse.quote(msg_hoy)}"
+
+                        st.markdown(f"""
+                            <div class='card-recordatorio'>
+                                <b>👤 {padre_nom}</b> — <i>{turno_nom}</i><br>
+                                Estudiante: {est} | Celular: {tel}<br><br>
+                                <a href='{url_aviso}' target='_blank' style='background-color:#25D366; color:white; padding:6px 14px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:14px; display:inline-block;'>
+                                    📲 Enviar Recordatorio por WhatsApp
+                                </a>
+                            </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("Para el día de hoy no hay turnos agendados.")
+            else:
+                st.info("No hay registros en el sistema todavía.")
         else:
-            st.info("Para el día de hoy no hay turnos agendados.")
+            st.error("Acceso denegado: Clave incorrecta.")
     else:
-        st.info("No hay registros en el sistema todavía.")
+        st.info("Ingrese la clave administrativa para visualizar los números de contacto y gestionar los avisos.")
