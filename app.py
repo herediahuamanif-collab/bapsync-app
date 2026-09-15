@@ -42,7 +42,7 @@ def cargar_turnos():
     if not API_URL:
         return pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
     try:
-        res = requests.get(API_URL, timeout=8)
+        res = requests.get(API_URL, timeout=10, allow_redirects=True)
         if res.status_code == 200:
             datos = res.json()
             return pd.DataFrame(datos) if datos else pd.DataFrame(columns=['fecha', 'dia', 'turno', 'padre', 'telefono', 'estudiante', 'grado', 'creado'])
@@ -55,7 +55,7 @@ col_izq, col_centro, col_der = st.columns([1, 4, 1])
 with col_centro:
     try:
         st.image("logo_bapsync.png", use_container_width=True)
-    except:
+    except Exception:
         st.markdown("<h2 style='text-align: center; color: #0c5c3c;'>🛡️ BapSync</h2>", unsafe_allow_html=True)
 
 st.markdown("<div class='banner-card'><b>Seguridad Escolar BAPES</b><br>Turnos: Mañana (7:30 - 8:15) y Tarde (2:15 - 3:00) | Máx. 5 padres por turno</div>", unsafe_allow_html=True)
@@ -133,8 +133,11 @@ with tab_registro:
             }
             
             try:
-                r = requests.post(API_URL, json=payload, timeout=10)
-                if r.status_code == 200:
+                # allow_redirects=True sigue la redirección 302 estándar de Google Apps Script
+                r = requests.post(API_URL, json=payload, timeout=15, allow_redirects=True)
+                
+                # Google Apps Script responde 200 tras seguir la redirección o texto con status ok
+                if r.status_code in [200, 302] or "ok" in r.text:
                     st.success("🎉 ¡Tu turno ha sido registrado correctamente!")
                     mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por cuidar la seguridad escolar!"
                     url_whatsapp = f"https://wa.me/51{telefono_padre}?text={urllib.parse.quote(mensaje_wa)}"
@@ -148,7 +151,7 @@ with tab_registro:
                     """, unsafe_allow_html=True)
                     st.rerun()
                 else:
-                    st.error("Error al guardar en la base de datos.")
+                    st.error(f"Error al guardar: Código {r.status_code} - Respuesta: {r.text[:120]}")
             except Exception as ex:
                 st.error(f"Error de conexión: {ex}")
 
