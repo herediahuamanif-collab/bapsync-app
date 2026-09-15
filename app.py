@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
+import calendar
 import urllib.parse
 import requests
 
 # 1. Configuración de página
 st.set_page_config(page_title="BapSync - Turnos BAPES", page_icon="🛡️", layout="centered")
 
-# Estilos visuales acordes al logo
+# Estilos visuales
 st.markdown("""
     <style>
     .stButton>button {
@@ -35,7 +36,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# URL DE LA API DE GOOGLE SHEETS (Secrets)
+# URL DE LA API DE GOOGLE SHEETS
 API_URL = st.secrets.get("SHEET_API_URL", "")
 
 def cargar_turnos():
@@ -51,7 +52,7 @@ def cargar_turnos():
     except Exception:
         return pd.DataFrame()
 
-# 2. Logo centrado
+# 2. Logo institucional
 col_izq, col_centro, col_der = st.columns([1, 4, 1])
 with col_centro:
     try:
@@ -59,32 +60,40 @@ with col_centro:
     except Exception:
         st.markdown("<h2 style='text-align: center; color: #0c5c3c;'>🛡️ BapSync</h2>", unsafe_allow_html=True)
 
-st.markdown("<div class='banner-card'><b>Seguridad Escolar BAPES</b><br>Turnos: Mañana (7:30 - 8:15) y Tarde (2:15 - 3:00) | Máx. 5 padres por turno</div>", unsafe_allow_html=True)
-
-# 3. Cálculo de la semana actual (Lunes a Viernes)
+# 3. Lógica mensual dinámica (Se renueva automáticamente el 1 de cada mes)
 hoy = datetime.today()
-lunes = hoy - timedelta(days=hoy.weekday())
-nombres_dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"]
-dias_dict = {}
+meses_nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                 "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-for i in range(5):
-    f = lunes + timedelta(days=i)
-    etiqueta = f"{nombres_dias[i]} {f.strftime('%d/%m')}"
-    dias_dict[etiqueta] = {
-        "fecha_str": f.strftime("%Y-%m-%d"),
-        "dia": nombres_dias[i]
-    }
+mes_actual_nombre = meses_nombres[hoy.month - 1]
+total_dias_mes = calendar.monthrange(hoy.year, hoy.month)[1]
+
+st.markdown(f"<div class='banner-card'><b>Seguridad Escolar BAPES — Mes de {mes_actual_nombre} {hoy.year}</b><br>Turnos: Mañana (7:30 - 8:15) y Tarde (2:15 - 3:00) | Máx. 5 padres por turno</div>", unsafe_allow_html=True)
+
+# Generar todos los lunes a viernes del mes
+dias_mes_dict = {}
+for dia_num in range(1, total_dias_mes + 1):
+    fecha_obj = datetime(hoy.year, hoy.month, dia_num)
+    if fecha_obj.weekday() < 5:  # Lunes a Viernes
+        nombre_d = dias_nombres[fecha_obj.weekday()]
+        etiqueta = f"{nombre_d} {dia_num:02d} de {mes_actual_nombre}"
+        dias_mes_dict[etiqueta] = {
+            "fecha_str": fecha_obj.strftime("%Y-%m-%d"),
+            "dia": nombre_d,
+            "dia_num": dia_num
+        }
 
 df_turnos = cargar_turnos()
 
-# 4. Pestañas
-tab_registro, tab_horario = st.tabs(["📝 Inscribirme a un Turno", "📅 Ver Horario Semanal"])
+# 4. Pestañas principales
+tab_registro, tab_horario = st.tabs(["📝 Inscribirme a un Turno", "📅 Ver Rol Mensual"])
 
 with tab_registro:
-    st.markdown("#### Selecciona la fecha y hora para asistir a BAPES:")
+    st.markdown(f"#### Selecciona tu fecha en {mes_actual_nombre} y turno:")
     
-    dia_elegido_label = st.selectbox("📅 Día de asistencia (Esta semana):", list(dias_dict.keys()))
-    info_dia = dias_dict[dia_elegido_label]
+    dia_elegido_label = st.selectbox("📅 Día de asistencia (Lunes a Viernes):", list(dias_mes_dict.keys()))
+    info_dia = dias_mes_dict[dia_elegido_label]
     
     turnos_disponibles = [
         "🌅 Mañana: 07:30 a 08:15 (Entrada)",
@@ -92,7 +101,7 @@ with tab_registro:
     ]
     turno_elegido = st.radio("⏰ Turno:", turnos_disponibles)
 
-    # Validar cupos en tiempo real
+    # Validar cupos en tiempo real para ese día y turno
     if not df_turnos.empty and "fecha" in df_turnos.columns and "turno" in df_turnos.columns:
         fechas_col = df_turnos["fecha"].astype(str).str.strip().str[:10]
         turnos_col = df_turnos["turno"].astype(str).str.strip()
@@ -107,9 +116,9 @@ with tab_registro:
     libres = 5 - ocupados
 
     if libres > 0:
-        st.info(f"✅ Cupos disponibles: **{libres} de 5**")
+        st.info(f"✅ Cupos disponibles: **{libres} de 5** para el {dia_elegido_label}")
     else:
-        st.error("❌ Turno completo (5/5 padres ya registrados). Elige otro horario.")
+        st.error(f"❌ Turno completo (5/5 padres registrados). Elige otro día u horario.")
 
     st.markdown("##### Tus Datos:")
     nombre_padre = st.text_input("Nombre y Apellidos del Apoderado:")
@@ -123,7 +132,7 @@ with tab_registro:
         elif libres <= 0:
             st.error("Lo sentimos, este turno ya está completo.")
         elif not API_URL:
-            st.error("Falta configurar la URL de la base de datos en los Secrets de Streamlit.")
+            st.error("Falta configurar la URL de la base de datos en los Secrets.")
         else:
             payload = {
                 "fecha": info_dia["fecha_str"],
@@ -141,7 +150,7 @@ with tab_registro:
                 
                 if r.status_code in [200, 302] or "ok" in r.text:
                     st.success("🎉 ¡Tu turno ha sido registrado correctamente!")
-                    mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por cuidar la seguridad escolar!"
+                    mensaje_wa = f"Hola {nombre_padre}, confirmaste tu turno en BAPES para el {dia_elegido_label} en el horario {turno_elegido}. ¡Gracias por apoyar en la seguridad escolar!"
                     url_whatsapp = f"https://wa.me/51{telefono_padre}?text={urllib.parse.quote(mensaje_wa)}"
                     
                     st.markdown(f"""
@@ -153,12 +162,12 @@ with tab_registro:
                     """, unsafe_allow_html=True)
                     st.rerun()
                 else:
-                    st.error(f"Error al guardar: Código {r.status_code} - Respuesta: {r.text[:120]}")
+                    st.error(f"Error al guardar: Código {r.status_code}")
             except Exception as ex:
                 st.error(f"Error de conexión: {ex}")
 
 with tab_horario:
-    st.markdown("#### 📋 Horario de Vigilancia BAPES (Semana Actual)")
+    st.markdown(f"#### 📋 Rol de Vigilancia BAPES ({mes_actual_nombre} {hoy.year})")
     
     col_ref, col_link = st.columns([1, 2])
     with col_ref:
@@ -168,21 +177,20 @@ with tab_horario:
         st.markdown("[📊 **Abrir hoja de Google Sheets completa**](https://docs.google.com/spreadsheets/d/1j6sczaZUeuds1bF1mzzHYHgSuy52q1nBbNeaCukg19M/edit?usp=sharing)")
 
     if not df_turnos.empty and "padre" in df_turnos.columns:
-        fechas_semana = [d["fecha_str"] for d in dias_dict.values()]
-        
-        # Limpieza flexible de fecha para que no falle si Google Sheets añade horas
+        # Filtrar solo registros del mes actual (YYYY-MM)
+        mes_prefijo = hoy.strftime("%Y-%m")
         if "fecha" in df_turnos.columns:
             df_turnos["fecha_corta"] = df_turnos["fecha"].astype(str).str.strip().str[:10]
-            df_filtrado = df_turnos[df_turnos["fecha_corta"].isin(fechas_semana)]
+            df_mes = df_turnos[df_turnos["fecha_corta"].str.startswith(mes_prefijo)].copy()
         else:
-            df_filtrado = pd.DataFrame()
-            
-        df_mostrar = df_filtrado if not df_filtrado.empty else df_turnos
+            df_mes = pd.DataFrame()
+
+        df_mostrar = df_mes if not df_mes.empty else df_turnos
 
         cols_deseadas = [c for c in ["dia", "fecha", "turno", "padre", "estudiante", "grado"] if c in df_mostrar.columns]
-        vista = df_mostrar[cols_deseadas].copy()
+        vista = df_mostrar[cols_deseadas].sort_values(by="fecha", ascending=True).copy()
         vista.columns = [c.capitalize() for c in cols_deseadas]
         
         st.dataframe(vista, use_container_width=True, hide_index=True)
     else:
-        st.info("Todavía no hay turnos registrados en la lista.")
+        st.info(f"Todavía no hay turnos registrados para el mes de {mes_actual_nombre}.")
